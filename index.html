@@ -43,6 +43,15 @@
         box-shadow: inset 0 -10px 10px rgba(0,0,0,0.2), 0 5px 10px rgba(0,0,0,0.3);
         z-index: 2;
     }
+    #food {
+        position: absolute;
+        font-size: 60px;
+        bottom: 30px;
+        display: none;
+        z-index: 2;
+        user-select: none;
+        filter: drop-shadow(0 2px 5px rgba(0,0,0,0.3));
+    }
     /* Controls panel */
     #controls {
         position: absolute;
@@ -86,11 +95,13 @@
         <button id="btn-walk">🚶 歩く</button>
         <button id="btn-run">🏃 走る</button>
         <button id="btn-drink">💧 水を飲む</button>
+        <button id="btn-feed">🍎 餌をあげる</button>
         <button id="btn-clone">✨ 分身</button>
         <button id="btn-stop">🛑 止まる</button>
     </div>
     
     <div id="water-bowl"></div>
+    <div id="food">🍎</div>
     <div id="world"></div>
 
     <script>
@@ -166,6 +177,23 @@
             setTimeout(() => playTone(783.99, 'sine', 0.3, 0.1), 200);
         }
 
+        function playEatSound() {
+            if(!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.1);
+            
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
         // --- Character Logic ---
         const world = document.getElementById('world');
         const waterBowl = document.getElementById('water-bowl');
@@ -181,13 +209,17 @@
                 this.x = x;
                 this.y = y; // from bottom
                 this.vx = 0;
-                this.state = 'idle'; // idle, walking, running, approach, drinking
+                this.state = 'idle'; // idle, walking, running, approach, approach_food, drinking, eating
                 this.bobAngle = Math.random() * Math.PI * 2;
                 this.direction = Math.random() > 0.5 ? 1 : -1;
                 this.targetX = null;
                 
+                this.currentScale = 1;
+                this.targetScale = 1;
+
                 // Active animation locks
                 this.isDrinking = false;
+                this.isEating = false;
                 this.isPetting = false;
 
                 this.updatePosition();
@@ -201,7 +233,7 @@
                     e.stopPropagation(); // Don't trigger background click
                     initAudio();
                     
-                    if (this.isPetting || this.isDrinking) return;
+                    if (this.isPetting || this.isDrinking || this.isEating) return;
 
                     this.isDragging = true;
                     this.hasMoved = false;
@@ -267,9 +299,9 @@
                 
                 // Happy jump animation
                 const anim = this.element.animate([
-                    { transform: `scaleX(${this.direction}) translateY(0)` },
-                    { transform: `scaleX(${this.direction}) translateY(-40px)` },
-                    { transform: `scaleX(${this.direction}) translateY(0)` }
+                    { transform: `scaleX(${this.direction * this.currentScale}) scaleY(${this.currentScale}) translateY(0)` },
+                    { transform: `scaleX(${this.direction * this.currentScale}) scaleY(${this.currentScale}) translateY(-40px)` },
+                    { transform: `scaleX(${this.direction * this.currentScale}) scaleY(${this.currentScale}) translateY(0)` }
                 ], {
                     duration: 350,
                     iterations: 2,
@@ -305,9 +337,9 @@
                     
                     // Squish / bob animation
                     this.element.animate([
-                        { transform: `scaleX(${this.direction}) scale(1, 1)` },
-                        { transform: `scaleX(${this.direction}) scale(1.1, 0.85) translateY(10px)` },
-                        { transform: `scaleX(${this.direction}) scale(1, 1)` }
+                        { transform: `scaleX(${this.direction * this.currentScale}) scaleY(${this.currentScale})` },
+                        { transform: `scaleX(${this.direction * this.currentScale * 1.1}) scaleY(${this.currentScale * 0.85}) translateY(10px)` },
+                        { transform: `scaleX(${this.direction * this.currentScale}) scaleY(${this.currentScale})` }
                     ], {
                         duration: 400,
                         easing: 'ease-in-out'
@@ -317,10 +349,67 @@
                 }, 600);
             }
 
+            startEating() {
+                if (this.isEating) return;
+                this.isEating = true;
+                this.vx = 0;
+                
+                let eatCount = 0;
+                const eatInterval = setInterval(() => {
+                    if (eatCount > 3) {
+                        clearInterval(eatInterval);
+                        this.isEating = false;
+                        this.state = 'idle';
+                        
+                        const othersEating = kudos.some(u => u !== this && (u.state === 'eating' || u.state === 'approach_food'));
+                        if (!othersEating) {
+                            document.getElementById('food').style.display = 'none';
+                        }
+
+                        // Grow huge!
+                        this.targetScale = 1.8;
+                        playTone(440, 'square', 0.1);
+                        setTimeout(() => playTone(880, 'square', 0.2), 100);
+                        
+                        // Shrink after 10 seconds
+                        setTimeout(() => {
+                            if (this.targetScale === 1.8) {
+                                this.targetScale = 1;
+                                playTone(880, 'sine', 0.1);
+                                setTimeout(() => playTone(440, 'sine', 0.2), 100);
+                            }
+                        }, 10000);
+                        return;
+                    }
+                    
+                    playEatSound();
+                    
+                    // Chomping animation
+                    this.element.animate([
+                        { transform: `scaleX(${this.direction * this.currentScale}) scaleY(${this.currentScale})` },
+                        { transform: `scaleX(${this.direction * this.currentScale * 1.05}) scaleY(${this.currentScale * 0.9}) translateY(5px)` },
+                        { transform: `scaleX(${this.direction * this.currentScale}) scaleY(${this.currentScale})` }
+                    ], {
+                        duration: 200,
+                        easing: 'ease-in-out'
+                    });
+                    
+                    eatCount++;
+                }, 300);
+            }
+
             update() {
-                if (this.isPetting || this.isDrinking) {
+                if (this.isPetting || this.isDrinking || this.isEating) {
                     this.updatePosition();
+                    // Smooth scaling update even while animating
+                    if (Math.abs(this.currentScale - this.targetScale) > 0.01) {
+                        this.currentScale += (this.targetScale - this.currentScale) * 0.05;
+                    }
                     return;
+                }
+
+                if (Math.abs(this.currentScale - this.targetScale) > 0.01) {
+                    this.currentScale += (this.targetScale - this.currentScale) * 0.05;
                 }
 
                 if (this.state === 'walking') {
@@ -333,19 +422,25 @@
                     this.bobAngle += 0.35;
                     // Play faster, different sound
                     if (Math.random() < 0.08) playRunSound();
-                } else if (this.state === 'approach') {
+                } else if (this.state === 'approach' || this.state === 'approach_food') {
                     if (this.targetX !== null) {
                         const dx = this.targetX - this.x;
                         this.direction = dx > 0 ? 1 : -1;
                         
-                        if (Math.abs(dx) > 5) {
-                            this.x += this.direction * 4;
-                            this.bobAngle += 0.25;
+                        // approach speed
+                        const speed = this.state === 'approach_food' ? 6 : 4;
+
+                        if (Math.abs(dx) > 10) {
+                            this.x += this.direction * speed;
+                            this.bobAngle += (speed === 6 ? 0.3 : 0.25);
                             if (Math.random() < 0.05) playWalkSound();
                         } else {
                             this.targetX = null;
                             // Approached target, what next?
-                            if (waterBowl.style.display === 'block') {
+                            if (this.state === 'approach_food' && document.getElementById('food').style.display === 'block') {
+                                this.state = 'eating';
+                                this.startEating();
+                            } else if (this.state === 'approach' && waterBowl.style.display === 'block') {
                                 this.state = 'drinking';
                                 this.startDrinking();
                             } else {
@@ -376,7 +471,7 @@
 
             updatePosition() {
                 let bobOffset = 0;
-                if (this.state === 'walking' || this.state === 'running' || this.state === 'approach') {
+                if (this.state === 'walking' || this.state === 'running' || this.state === 'approach' || this.state === 'approach_food') {
                     // Calculate a bouncing effect
                     bobOffset = Math.abs(Math.sin(this.bobAngle)) * (this.state === 'running' ? 25 : 12);
                 }
@@ -384,8 +479,8 @@
                 this.element.style.left = `${this.x}px`;
                 this.element.style.bottom = `${this.y + bobOffset}px`;
                 
-                if (!this.isPetting && !this.isDrinking) {
-                    this.element.style.transform = `scaleX(${this.direction})`;
+                if (!this.isPetting && !this.isDrinking && !this.isEating) {
+                    this.element.style.transform = `scaleX(${this.direction * this.currentScale}) scaleY(${this.currentScale})`;
                 }
             }
         }
@@ -404,7 +499,7 @@
         document.getElementById('btn-walk').addEventListener('click', () => {
             initAudio();
             kudos.forEach(u => {
-                if(u.isPetting || u.isDrinking) return;
+                if(u.isPetting || u.isDrinking || u.isEating) return;
                 u.state = 'walking';
                 if (u.vx === 0) u.direction = Math.random() > 0.5 ? 1 : -1;
                 u.vx = u.direction * 3;
@@ -414,7 +509,7 @@
         document.getElementById('btn-run').addEventListener('click', () => {
             initAudio();
             kudos.forEach(u => {
-                if(u.isPetting || u.isDrinking) return;
+                if(u.isPetting || u.isDrinking || u.isEating) return;
                 u.state = 'running';
                 if (u.vx === 0) u.direction = Math.random() > 0.5 ? 1 : -1;
                 u.vx = u.direction * 8;
@@ -424,7 +519,7 @@
         document.getElementById('btn-stop').addEventListener('click', () => {
             initAudio();
             kudos.forEach(u => {
-                if(u.isPetting || u.isDrinking) return;
+                if(u.isPetting || u.isDrinking || u.isEating) return;
                 u.state = 'idle';
                 u.vx = 0;
                 u.targetX = null;
@@ -437,10 +532,27 @@
             const bowlX = window.innerWidth / 2;
             
             kudos.forEach(u => {
-                if(u.isPetting || u.isDrinking) return;
+                if(u.isPetting || u.isDrinking || u.isEating) return;
                 u.state = 'approach';
                 // Move towards bowl, slightly staggered
                 u.targetX = bowlX - 250 + (Math.random() * 60 - 30); 
+            });
+        });
+
+        document.getElementById('btn-feed').addEventListener('click', () => {
+            initAudio();
+            const food = document.getElementById('food');
+            food.style.display = 'block';
+            
+            // Randomly position the food near the center
+            const foodX = window.innerWidth / 2 + (Math.random() * 200 - 100);
+            food.style.left = `${foodX}px`;
+            
+            kudos.forEach(u => {
+                if(u.isPetting || u.isDrinking || u.isEating) return;
+                u.state = 'approach_food';
+                // Move towards food
+                u.targetX = foodX - 250 + (Math.random() * 60 - 30); 
             });
         });
 
@@ -475,7 +587,7 @@
             initAudio();
             
             kudos.forEach(u => {
-                if(u.isPetting || u.isDrinking) return;
+                if(u.isPetting || u.isDrinking || u.isEating) return;
                 u.state = 'approach'; 
                 u.targetX = e.clientX - 250; // center character on click x
             });
