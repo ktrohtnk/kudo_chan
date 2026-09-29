@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>空洞ちゃん インタラクティブ (Kudo-chan Interactive)</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    body {
+        margin: 0;
+        overflow: hidden;
+        /* A nice pasture-like background */
+        background: linear-gradient(to bottom, #87CEEB 0%, #87CEEB 60%, #90EE90 60%, #90EE90 100%);
+        font-family: sans-serif;
+        touch-action: none; /* Prevent scroll on touch devices */
+    }
+    .kudo-chan {
+        position: absolute;
+        width: 180px; /* Adjusted size */
+        height: auto;
+        cursor: pointer;
+        user-select: none;
+        transform-origin: bottom center;
+        /* Blend the white background of the image with the scene */
+        mix-blend-mode: multiply;
+        /* Optional drop-shadow for hover */
+        transition: filter 0.3s;
+        z-index: 5;
+    }
+    .kudo-chan:hover {
+        filter: drop-shadow(0px 0px 15px rgba(255, 105, 180, 0.8));
+    }
+    #water-bowl {
+        position: absolute;
+        width: 120px;
+        height: 35px;
+        background: #4682B4;
+        border: 4px solid #708090;
+        border-radius: 50%;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        box-shadow: inset 0 -10px 10px rgba(0,0,0,0.2), 0 5px 10px rgba(0,0,0,0.3);
+        z-index: 2;
+    }
+    /* Controls panel */
+    #controls {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 10;
+        background: rgba(255, 255, 255, 0.85);
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        max-width: 90vw;
+    }
+    button {
+        padding: 10px 18px;
+        border: none;
+        border-radius: 8px;
+        background: #3b82f6;
+        color: white;
+        font-weight: bold;
+        cursor: pointer;
+        transition: opacity 0.2s, transform 0.1s;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    button:hover {
+        opacity: 0.9;
+    }
+    button:active {
+        transform: scale(0.95);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }
+    #btn-stop {
+        background: #ef4444;
+    }
+  </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="btn-walk">🚶 歩く</button>
+        <button id="btn-run">🏃 走る</button>
+        <button id="btn-drink">💧 水を飲む</button>
+        <button id="btn-clone">✨ 分身</button>
+        <button id="btn-stop">🛑 止まる</button>
+    </div>
+    
+    <div id="water-bowl"></div>
+    <div id="world"></div>
+
+    <script>
+        // --- Audio Context & Synth Setup ---
+        let audioCtx;
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        // Generic tone generator
+        function playTone(freq, type, duration, vol=0.1) {
+            if(!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            
+            gainNode.gain.setValueAtTime(vol, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        // Procedural sound effects
+        function playWalkSound() {
+            // C Major Pentatonic for happy walking
+            const notes = [261.63, 293.66, 329.63, 392.00, 440.00]; 
+            const note = notes[Math.floor(Math.random() * notes.length)];
+            playTone(note, 'sine', 0.2, 0.1);
+        }
+
+        function playRunSound() {
+            // Higher octave for running
+            const notes = [523.25, 587.33, 659.25, 783.99, 880.00, 1046.50]; 
+            const note = notes[Math.floor(Math.random() * notes.length)];
+            playTone(note, 'triangle', 0.1, 0.08);
+        }
+
+        function playDrinkSound() {
+            if(!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.type = 'sine';
+            
+            // Sweeping frequency down to simulate gulping
+            osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.3);
+            
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3);
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.3);
+        }
+
+        function playPetSound() {
+            if(!audioCtx) return;
+            // A happy little arpeggio
+            setTimeout(() => playTone(523.25, 'sine', 0.15, 0.1), 0);
+            setTimeout(() => playTone(659.25, 'sine', 0.15, 0.1), 100);
+            setTimeout(() => playTone(783.99, 'sine', 0.3, 0.1), 200);
+        }
+
+        // --- Character Logic ---
+        const world = document.getElementById('world');
+        const waterBowl = document.getElementById('water-bowl');
+        let kudos = [];
+
+        class KudoChan {
+            constructor(x, y) {
+                this.element = document.createElement('img');
+                this.element.src = 'kudo_chan.png'; 
+                this.element.className = 'kudo-chan';
+                this.element.draggable = false;
+                
+                this.x = x;
+                this.y = y; // from bottom
+                this.vx = 0;
+                this.state = 'idle'; // idle, walking, running, approach, drinking
+                this.bobAngle = Math.random() * Math.PI * 2;
+                this.direction = Math.random() > 0.5 ? 1 : -1;
+                this.targetX = null;
+                
+                // Active animation locks
+                this.isDrinking = false;
+                this.isPetting = false;
+
+                this.updatePosition();
+                world.appendChild(this.element);
+
+                // Click interaction (Petting)
+                this.element.addEventListener('pointerdown', (e) => {
+                    e.stopPropagation(); // Don't trigger background click
+                    initAudio();
+                    this.pet();
+                });
+
+                kudos.push(this);
+            }
+
+            pet() {
+                if (this.isPetting) return;
+                this.isPetting = true;
+                this.state = 'petting';
+                this.vx = 0;
+                this.targetX = null;
+                
+                playPetSound();
+                
+                // Happy jump animation
+                const anim = this.element.animate([
+                    { transform: `scaleX(${this.direction}) translateY(0)` },
+                    { transform: `scaleX(${this.direction}) translateY(-40px)` },
+                    { transform: `scaleX(${this.direction}) translateY(0)` }
+                ], {
+                    duration: 350,
+                    iterations: 2,
+                    easing: 'ease-in-out'
+                });
+
+                anim.onfinish = () => {
+                    this.isPetting = false;
+                    this.state = 'idle';
+                };
+            }
+
+            startDrinking() {
+                if (this.isDrinking) return;
+                this.isDrinking = true;
+                this.vx = 0;
+                
+                let drinkCount = 0;
+                const drinkInterval = setInterval(() => {
+                    if (drinkCount > 4) {
+                        clearInterval(drinkInterval);
+                        this.isDrinking = false;
+                        this.state = 'idle';
+                        // Hide bowl if no one else is drinking/approaching
+                        const othersDrinking = kudos.some(u => u !== this && (u.state === 'drinking' || u.state === 'approach'));
+                        if (!othersDrinking) {
+                            waterBowl.style.display = 'none';
+                        }
+                        return;
+                    }
+                    
+                    playDrinkSound();
+                    
+                    // Squish / bob animation
+                    this.element.animate([
+                        { transform: `scaleX(${this.direction}) scale(1, 1)` },
+                        { transform: `scaleX(${this.direction}) scale(1.1, 0.85) translateY(10px)` },
+                        { transform: `scaleX(${this.direction}) scale(1, 1)` }
+                    ], {
+                        duration: 400,
+                        easing: 'ease-in-out'
+                    });
+                    
+                    drinkCount++;
+                }, 600);
+            }
+
+            update() {
+                if (this.isPetting || this.isDrinking) {
+                    this.updatePosition();
+                    return;
+                }
+
+                if (this.state === 'walking') {
+                    this.x += this.vx;
+                    this.bobAngle += 0.15;
+                    // Play procedural sound randomly based on movement
+                    if (Math.random() < 0.03) playWalkSound();
+                } else if (this.state === 'running') {
+                    this.x += this.vx;
+                    this.bobAngle += 0.35;
+                    // Play faster, different sound
+                    if (Math.random() < 0.08) playRunSound();
+                } else if (this.state === 'approach') {
+                    if (this.targetX !== null) {
+                        const dx = this.targetX - this.x;
+                        this.direction = dx > 0 ? 1 : -1;
+                        
+                        if (Math.abs(dx) > 5) {
+                            this.x += this.direction * 4;
+                            this.bobAngle += 0.25;
+                            if (Math.random() < 0.05) playWalkSound();
+                        } else {
+                            this.targetX = null;
+                            // Approached target, what next?
+                            if (waterBowl.style.display === 'block') {
+                                this.state = 'drinking';
+                                this.startDrinking();
+                            } else {
+                                this.state = 'idle';
+                            }
+                        }
+                    }
+                }
+
+                // Screen bounds wrapping
+                const w = window.innerWidth;
+                const charWidth = 180;
+                if (this.x > w + charWidth/2) this.x = -charWidth;
+                if (this.x < -charWidth) this.x = w + charWidth/2;
+
+                this.updatePosition();
+            }
+
+            updatePosition() {
+                let bobOffset = 0;
+                if (this.state === 'walking' || this.state === 'running' || this.state === 'approach') {
+                    // Calculate a bouncing effect
+                    bobOffset = Math.abs(Math.sin(this.bobAngle)) * (this.state === 'running' ? 25 : 12);
+                }
+                
+                this.element.style.left = `${this.x}px`;
+                this.element.style.bottom = `${this.y + bobOffset}px`;
+                
+                if (!this.isPetting && !this.isDrinking) {
+                    this.element.style.transform = `scaleX(${this.direction})`;
+                }
+            }
+        }
+
+        // --- Game Loop ---
+        function loop() {
+            kudos.forEach(u => u.update());
+            requestAnimationFrame(loop);
+        }
+        loop();
+
+        // Initialize first Kudo-chan
+        new KudoChan(window.innerWidth / 2 - 90, 40);
+
+        // --- Controls Event Listeners ---
+        document.getElementById('btn-walk').addEventListener('click', () => {
+            initAudio();
+            kudos.forEach(u => {
+                if(u.isPetting || u.isDrinking) return;
+                u.state = 'walking';
+                if (u.vx === 0) u.direction = Math.random() > 0.5 ? 1 : -1;
+                u.vx = u.direction * 3;
+            });
+        });
+
+        document.getElementById('btn-run').addEventListener('click', () => {
+            initAudio();
+            kudos.forEach(u => {
+                if(u.isPetting || u.isDrinking) return;
+                u.state = 'running';
+                if (u.vx === 0) u.direction = Math.random() > 0.5 ? 1 : -1;
+                u.vx = u.direction * 8;
+            });
+        });
+
+        document.getElementById('btn-stop').addEventListener('click', () => {
+            initAudio();
+            kudos.forEach(u => {
+                if(u.isPetting || u.isDrinking) return;
+                u.state = 'idle';
+                u.vx = 0;
+                u.targetX = null;
+            });
+        });
+
+        document.getElementById('btn-drink').addEventListener('click', () => {
+            initAudio();
+            waterBowl.style.display = 'block';
+            const bowlX = window.innerWidth / 2;
+            
+            kudos.forEach(u => {
+                if(u.isPetting || u.isDrinking) return;
+                u.state = 'approach';
+                // Move towards bowl, slightly staggered
+                u.targetX = bowlX - 90 + (Math.random() * 60 - 30); 
+            });
+        });
+
+        document.getElementById('btn-clone').addEventListener('click', () => {
+            initAudio();
+            // Popping sound for clone
+            playTone(880, 'sine', 0.1);
+            setTimeout(() => playTone(1760, 'sine', 0.1), 100);
+
+            // Spawn near an existing character if possible
+            let x = Math.random() * window.innerWidth;
+            if (kudos.length > 0) {
+                const parent = kudos[Math.floor(Math.random() * kudos.length)];
+                x = parent.x + (Math.random() * 120 - 60);
+            }
+            
+            const newUro = new KudoChan(x, 40);
+            
+            // Inherit activity from others
+            const someActive = kudos.find(u => u.state === 'walking' || u.state === 'running');
+            if (someActive) {
+                newUro.state = someActive.state;
+                newUro.direction = someActive.direction;
+                newUro.vx = someActive.vx;
+            }
+        });
+
+        // Click background to command them to move there
+        document.body.addEventListener('pointerdown', (e) => {
+            // Ignore UI clicks and character clicks
+            if (e.target.tagName === 'BUTTON' || e.target.classList.contains('kudo-chan')) return;
+            initAudio();
+            
+            kudos.forEach(u => {
+                if(u.isPetting || u.isDrinking) return;
+                u.state = 'approach'; 
+                u.targetX = e.clientX - 90; // center character on click x
+            });
+            
+            // Draw a quick ripple effect on click
+            const indicator = document.createElement('div');
+            indicator.style.position = 'absolute';
+            indicator.style.left = `${e.clientX - 15}px`;
+            indicator.style.top = `${e.clientY - 15}px`;
+            indicator.style.width = '30px';
+            indicator.style.height = '30px';
+            indicator.style.border = '3px solid white';
+            indicator.style.borderRadius = '50%';
+            indicator.style.pointerEvents = 'none';
+            indicator.style.zIndex = '1';
+            document.body.appendChild(indicator);
+            
+            indicator.animate([
+                { transform: 'scale(0.5)', opacity: 1 },
+                { transform: 'scale(2.5)', opacity: 0 }
+            ], {
+                duration: 500,
+                easing: 'ease-out'
+            }).onfinish = () => indicator.remove();
+        });
+
+    </script>
+</body>
+</html>
