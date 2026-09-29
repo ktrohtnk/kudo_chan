@@ -15,7 +15,7 @@
     }
     .kudo-chan {
         position: absolute;
-        width: 180px; /* Adjusted size */
+        width: 500px; /* Much bigger size */
         height: auto;
         cursor: pointer;
         user-select: none;
@@ -304,7 +304,7 @@
 
                 // Screen bounds wrapping
                 const w = window.innerWidth;
-                const charWidth = 180;
+                const charWidth = 500;
                 if (this.x > w + charWidth/2) this.x = -charWidth;
                 if (this.x < -charWidth) this.x = w + charWidth/2;
 
@@ -335,7 +335,7 @@
         loop();
 
         // Initialize first Kudo-chan
-        new KudoChan(window.innerWidth / 2 - 90, 40);
+        new KudoChan(window.innerWidth / 2 - 250, 40);
 
         // --- Controls Event Listeners ---
         document.getElementById('btn-walk').addEventListener('click', () => {
@@ -377,7 +377,7 @@
                 if(u.isPetting || u.isDrinking) return;
                 u.state = 'approach';
                 // Move towards bowl, slightly staggered
-                u.targetX = bowlX - 90 + (Math.random() * 60 - 30); 
+                u.targetX = bowlX - 250 + (Math.random() * 60 - 30); 
             });
         });
 
@@ -414,7 +414,7 @@
             kudos.forEach(u => {
                 if(u.isPetting || u.isDrinking) return;
                 u.state = 'approach'; 
-                u.targetX = e.clientX - 90; // center character on click x
+                u.targetX = e.clientX - 250; // center character on click x
             });
             
             // Draw a quick ripple effect on click
